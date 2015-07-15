@@ -19,9 +19,11 @@ automatically.
 from __future__ import unicode_literals
 
 from functools import update_wrapper
+
 from django.utils.decorators import classonlymethod
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework import views, generics, mixins
+
+from rest_framework import generics, mixins, views
 
 
 class ViewSetMixin(object):
@@ -80,6 +82,12 @@ class ViewSetMixin(object):
             # Patch this in as it's otherwise only present from 1.5 onwards
             if hasattr(self, 'get') and not hasattr(self, 'head'):
                 self.head = self.get
+
+            # Explicitly map `options` requests to an (implicit) action named
+            # 'metadata'. This action doesn't actually exist as a named method,
+            # because, unlike other methods, we always route to it.
+            if hasattr(self, 'options'):
+                self.action_map['options'] = 'metadata'
 
             # And continue as usual
             return self.dispatch(request, *args, **kwargs)

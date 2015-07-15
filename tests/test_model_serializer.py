@@ -6,15 +6,20 @@ These tests deal with ensuring that we correctly map the model fields onto
 an appropriate set of serializer fields for each case.
 """
 from __future__ import unicode_literals
+
 import django
+import pytest
 from django.core.exceptions import ImproperlyConfigured
-from django.core.validators import MaxValueValidator, MinValueValidator, MinLengthValidator
+from django.core.validators import (
+    MaxValueValidator, MinLengthValidator, MinValueValidator
+)
 from django.db import models
 from django.test import TestCase
 from django.utils import six
-import pytest
+
 from rest_framework import serializers
-from rest_framework.compat import unicode_repr, DurationField as ModelDurationField
+from rest_framework.compat import DurationField as ModelDurationField
+from rest_framework.compat import unicode_repr
 
 
 def dedent(blocktext):
@@ -227,6 +232,23 @@ class TestRegularFieldMappings(TestCase):
             TestSerializer():
                 auto_field = IntegerField(read_only=True)
                 char_field = CharField(default='extra', max_length=100)
+        """)
+        self.assertEqual(repr(TestSerializer()), expected)
+
+    def test_extra_field_kwargs_required(self):
+        """
+        Ensure `extra_kwargs` are passed to generated fields.
+        """
+        class TestSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = RegularFieldsModel
+                fields = ('auto_field', 'char_field')
+                extra_kwargs = {'auto_field': {'required': False, 'read_only': False}}
+
+        expected = dedent("""
+            TestSerializer():
+                auto_field = IntegerField(read_only=False, required=False)
+                char_field = CharField(max_length=100)
         """)
         self.assertEqual(repr(TestSerializer()), expected)
 
@@ -721,3 +743,28 @@ class TestSerializerMetaClass(TestCase):
             str(exception),
             "Cannot set both 'fields' and 'exclude' options on serializer ExampleSerializer."
         )
+
+
+class Issue2704TestCase(TestCase):
+    def test_queryset_all(self):
+        class TestSerializer(serializers.ModelSerializer):
+            additional_attr = serializers.CharField()
+
+            class Meta:
+                model = OneFieldModel
+                fields = ('char_field', 'additional_attr')
+
+        OneFieldModel.objects.create(char_field='abc')
+        qs = OneFieldModel.objects.all()
+
+        for o in qs:
+            o.additional_attr = '123'
+
+        serializer = TestSerializer(instance=qs, many=True)
+
+        expected = [{
+            'char_field': 'abc',
+            'additional_attr': '123',
+        }]
+
+        assert serializer.data == expected

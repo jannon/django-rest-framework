@@ -1,14 +1,19 @@
 # coding: utf-8
 from __future__ import unicode_literals
-from django.core.exceptions import ObjectDoesNotExist, ImproperlyConfigured
-from django.core.urlresolvers import get_script_prefix, resolve, NoReverseMatch, Resolver404
+
+from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
+from django.core.urlresolvers import (
+    NoReverseMatch, Resolver404, get_script_prefix, resolve
+)
+from django.db.models import Manager
 from django.db.models.query import QuerySet
 from django.utils import six
 from django.utils.encoding import smart_text
 from django.utils.six.moves.urllib import parse as urlparse
 from django.utils.translation import ugettext_lazy as _
+
 from rest_framework.compat import OrderedDict
-from rest_framework.fields import get_attribute, empty, Field
+from rest_framework.fields import Field, empty, get_attribute
 from rest_framework.reverse import reverse
 from rest_framework.utils import html
 
@@ -42,6 +47,7 @@ class RelatedField(Field):
             'Relational fields should not provide a `queryset` argument, '
             'when setting read_only=`True`.'
         )
+        kwargs.pop('many', None)
         super(RelatedField, self).__init__(**kwargs)
 
     def __new__(cls, *args, **kwargs):
@@ -82,8 +88,13 @@ class RelatedField(Field):
 
     def get_queryset(self):
         queryset = self.queryset
-        if isinstance(queryset, QuerySet):
+        if isinstance(queryset, (QuerySet, Manager)):
             # Ensure queryset is re-evaluated whenever used.
+            # Note that actually a `Manager` class may also be used as the
+            # queryset argument. This occurs on ModelSerializer fields,
+            # as it allows us to generate a more expressive 'repr' output
+            # for the field.
+            # Eg: 'MyRelationship(queryset=ExampleModel.objects.all())'
             queryset = queryset.all()
         return queryset
 
@@ -104,12 +115,18 @@ class RelatedField(Field):
 
     @property
     def choices(self):
+        queryset = self.get_queryset()
+        if queryset is None:
+            # Ensure that field.choices returns something sensible
+            # even when accessed with a read-only field.
+            return {}
+
         return OrderedDict([
             (
                 six.text_type(self.to_representation(item)),
                 six.text_type(item)
             )
-            for item in self.queryset.all()
+            for item in queryset
         ])
 
 
@@ -134,10 +151,16 @@ class PrimaryKeyRelatedField(RelatedField):
         'incorrect_type': _('Incorrect type. Expected pk value, received {data_type}.'),
     }
 
+    def __init__(self, **kwargs):
+        self.pk_field = kwargs.pop('pk_field', None)
+        super(PrimaryKeyRelatedField, self).__init__(**kwargs)
+
     def use_pk_only_optimization(self):
         return True
 
     def to_internal_value(self, data):
+        if self.pk_field is not None:
+            data = self.pk_field.to_internal_value(data)
         try:
             return self.get_queryset().get(pk=data)
         except ObjectDoesNotExist:
@@ -146,6 +169,8 @@ class PrimaryKeyRelatedField(RelatedField):
             self.fail('incorrect_type', data_type=type(data).__name__)
 
     def to_representation(self, value):
+        if self.pk_field is not None:
+            return self.pk_field.to_representation(value.pk)
         return value.pk
 
 
@@ -269,6 +294,13 @@ class HyperlinkedRelatedField(RelatedField):
                 'model in your API, or incorrectly configured the '
                 '`lookup_field` attribute on this field.'
             )
+            if value in ('', None):
+                value_string = {'': 'the empty string', None: 'None'}[value]
+                msg += (
+                    " WARNING: The value of the field on the model instance "
+                    "was %s, which may be why it didn't match any "
+                    "entries in your URL conf." % value_string
+                )
             raise ImproperlyConfigured(msg % self.view_name)
 
 
@@ -375,16 +407,4 @@ class ManyRelatedField(Field):
 
     @property
     def choices(self):
-        queryset = self.child_relation.queryset
-        iterable = queryset.all() if (hasattr(queryset, 'all')) else queryset
-        items_and_representations = [
-            (item, self.child_relation.to_representation(item))
-            for item in iterable
-        ]
-        return OrderedDict([
-            (
-                six.text_type(item_representation),
-                six.text_type(item) + ' - ' + six.text_type(item_representation)
-            )
-            for item, item_representation in items_and_representations
-        ])
+        return self.child_relation.choices

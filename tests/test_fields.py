@@ -1,11 +1,13 @@
-from decimal import Decimal
-from django.utils import timezone
-from rest_framework import serializers
-import rest_framework
 import datetime
+import uuid
+from decimal import Decimal
+
 import django
 import pytest
-import uuid
+from django.utils import timezone
+
+import rest_framework
+from rest_framework import serializers
 
 
 # Tests for field keyword arguments and core functionality.
@@ -460,6 +462,13 @@ class TestCharField(FieldValues):
     def test_trim_whitespace_disabled(self):
         field = serializers.CharField(trim_whitespace=False)
         assert field.to_internal_value(' abc ') == ' abc '
+
+    def test_disallow_blank_with_trim_whitespace(self):
+        field = serializers.CharField(allow_blank=False, trim_whitespace=True)
+
+        with pytest.raises(serializers.ValidationError) as exc_info:
+            field.run_validation('   ')
+        assert exc_info.value.detail == ['This field may not be blank.']
 
 
 class TestEmailField(FieldValues):

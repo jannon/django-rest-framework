@@ -1,10 +1,14 @@
 from __future__ import unicode_literals
+
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.test import TestCase
-from django.core.validators import MinValueValidator, MaxValueValidator
-from rest_framework import exceptions, metadata, serializers, status, views, versioning
-from rest_framework.request import Request
+
+from rest_framework import (
+    exceptions, metadata, serializers, status, versioning, views
+)
 from rest_framework.renderers import BrowsableAPIRenderer
+from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 request = Request(APIRequestFactory().options('/'))
@@ -63,6 +67,11 @@ class TestMetadata:
             char_field = serializers.CharField(
                 required=False, min_length=3, max_length=40
             )
+            list_field = serializers.ListField(
+                child=serializers.ListField(
+                    child=serializers.IntegerField()
+                )
+            )
 
         class ExampleView(views.APIView):
             """Example view."""
@@ -115,6 +124,22 @@ class TestMetadata:
                         'label': 'Char field',
                         'min_length': 3,
                         'max_length': 40
+                    },
+                    'list_field': {
+                        'type': 'list',
+                        'required': True,
+                        'read_only': False,
+                        'label': 'List field',
+                        'child': {
+                            'type': 'list',
+                            'required': True,
+                            'read_only': False,
+                            'child': {
+                                'type': 'integer',
+                                'required': True,
+                                'read_only': False
+                            }
+                        }
                     }
                 }
             }

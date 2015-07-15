@@ -1,23 +1,5 @@
 from __future__ import unicode_literals
-from django.conf import settings
-from django.core.exceptions import ObjectDoesNotExist
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.validators import RegexValidator, ip_address_validators
-from django.forms import ImageField as DjangoImageField
-from django.utils import six, timezone
-from django.utils.dateparse import parse_date, parse_datetime, parse_time
-from django.utils.encoding import is_protected_type, smart_text
-from django.utils.translation import ugettext_lazy as _
-from django.utils.ipv6 import clean_ipv6_address
-from rest_framework import ISO_8601
-from rest_framework.compat import (
-    EmailValidator, MinValueValidator, MaxValueValidator,
-    MinLengthValidator, MaxLengthValidator, URLValidator, OrderedDict,
-    unicode_repr, unicode_to_repr, parse_duration, duration_string,
-)
-from rest_framework.exceptions import ValidationError
-from rest_framework.settings import api_settings
-from rest_framework.utils import html, representation, humanize_datetime
+
 import collections
 import copy
 import datetime
@@ -25,6 +7,27 @@ import decimal
 import inspect
 import re
 import uuid
+
+from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.validators import RegexValidator, ip_address_validators
+from django.forms import ImageField as DjangoImageField
+from django.utils import six, timezone
+from django.utils.dateparse import parse_date, parse_datetime, parse_time
+from django.utils.encoding import is_protected_type, smart_text
+from django.utils.ipv6 import clean_ipv6_address
+from django.utils.translation import ugettext_lazy as _
+
+from rest_framework import ISO_8601
+from rest_framework.compat import (
+    EmailValidator, MaxLengthValidator, MaxValueValidator, MinLengthValidator,
+    MinValueValidator, OrderedDict, URLValidator, duration_string,
+    parse_duration, unicode_repr, unicode_to_repr
+)
+from rest_framework.exceptions import ValidationError
+from rest_framework.settings import api_settings
+from rest_framework.utils import html, humanize_datetime, representation
 
 
 class empty:
@@ -417,10 +420,11 @@ class Field(object):
         Transform the *outgoing* native value into primitive data.
         """
         raise NotImplementedError(
-            '{cls}.to_representation() must be implemented.\n'
-            'If you are upgrading from REST framework version 2 '
-            'you might want `ReadOnlyField`.'.format(
-                cls=self.__class__.__name__
+            '{cls}.to_representation() must be implemented for field '
+            '{field_name}. If you do not need to support write operations '
+            'you probably want to subclass `ReadOnlyField` instead.'.format(
+                cls=self.__class__.__name__,
+                field_name=self.field_name,
             )
         )
 
@@ -580,7 +584,7 @@ class CharField(Field):
         # Test for the empty string here so that it does not get validated,
         # and so that subclasses do not need to handle it explicitly
         # inside the `to_internal_value()` method.
-        if data == '':
+        if data == '' or (self.trim_whitespace and six.text_type(data).strip() == ''):
             if not self.allow_blank:
                 self.fail('blank')
             return ''
@@ -885,6 +889,7 @@ class DateTimeField(Field):
     format = api_settings.DATETIME_FORMAT
     input_formats = api_settings.DATETIME_INPUT_FORMATS
     default_timezone = timezone.get_default_timezone() if settings.USE_TZ else None
+    datetime_parser = datetime.datetime.strptime
 
     def __init__(self, format=empty, input_formats=None, default_timezone=None, *args, **kwargs):
         self.format = format if format is not empty else self.format
@@ -921,7 +926,7 @@ class DateTimeField(Field):
                         return self.enforce_timezone(parsed)
             else:
                 try:
-                    parsed = datetime.datetime.strptime(value, format)
+                    parsed = self.datetime_parser(value, format)
                 except (ValueError, TypeError):
                     pass
                 else:
@@ -949,6 +954,7 @@ class DateField(Field):
     }
     format = api_settings.DATE_FORMAT
     input_formats = api_settings.DATE_INPUT_FORMATS
+    datetime_parser = datetime.datetime.strptime
 
     def __init__(self, format=empty, input_formats=None, *args, **kwargs):
         self.format = format if format is not empty else self.format
@@ -973,7 +979,7 @@ class DateField(Field):
                         return parsed
             else:
                 try:
-                    parsed = datetime.datetime.strptime(value, format)
+                    parsed = self.datetime_parser(value, format)
                 except (ValueError, TypeError):
                     pass
                 else:
@@ -1012,6 +1018,7 @@ class TimeField(Field):
     }
     format = api_settings.TIME_FORMAT
     input_formats = api_settings.TIME_INPUT_FORMATS
+    datetime_parser = datetime.datetime.strptime
 
     def __init__(self, format=empty, input_formats=None, *args, **kwargs):
         self.format = format if format is not empty else self.format
@@ -1033,7 +1040,7 @@ class TimeField(Field):
                         return parsed
             else:
                 try:
-                    parsed = datetime.datetime.strptime(value, format)
+                    parsed = self.datetime_parser(value, format)
                 except (ValueError, TypeError):
                     pass
                 else:
@@ -1198,8 +1205,12 @@ class FileField(Field):
         return data
 
     def to_representation(self, value):
+        if not value:
+            return None
+
         if self.use_url:
-            if not value:
+            if not getattr(value, 'url', None):
+                # If the file has not been saved it may not have a URL.
                 return None
             url = value.url
             request = self.context.get('request', None)

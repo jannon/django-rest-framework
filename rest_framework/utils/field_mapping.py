@@ -2,13 +2,14 @@
 Helper functions for mapping model fields to a dictionary of default
 keyword arguments that should be used for their equivelent serializer fields.
 """
+import inspect
+
 from django.core import validators
 from django.db import models
 from django.utils.text import capfirst
+
 from rest_framework.compat import clean_manytomany_helptext
 from rest_framework.validators import UniqueValidator
-import inspect
-
 
 NUMERIC_FIELD_TYPES = (
     models.IntegerField, models.FloatField, models.DecimalField
@@ -36,7 +37,7 @@ class ClassLookupDict(object):
         for cls in inspect.getmro(base_class):
             if cls in self.mapping:
                 return self.mapping[cls]
-        raise KeyError('Class %s not found in lookup.', cls.__name__)
+        raise KeyError('Class %s not found in lookup.' % base_class.__name__)
 
     def __setitem__(self, key, value):
         self.mapping[key] = value
