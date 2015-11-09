@@ -176,7 +176,7 @@ body{
 }
 
 #main-content h3, #main-content h4, #main-content h5 {
-    font-weight: 500;
+    font-weight: 300;
     margin-top: 15px
 }
 
@@ -412,4 +412,8 @@ ul.sponsor {
 
 #mkdocs_search_modal article p{
   word-wrap: break-word;
+}
+
+.toclink {
+  color: #333;
 }

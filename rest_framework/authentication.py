@@ -5,13 +5,12 @@ from __future__ import unicode_literals
 
 import base64
 
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, get_user_model
 from django.middleware.csrf import CsrfViewMiddleware
 from django.utils.translation import ugettext_lazy as _
 
 from rest_framework import HTTP_HEADER_ENCODING, exceptions
 from rest_framework.authtoken.models import Token
-from rest_framework.compat import get_user_model
 
 
 def get_authorization_header(request):
@@ -89,9 +88,8 @@ class BasicAuthentication(BaseAuthentication):
         """
         Authenticate the userid and password against username and password.
         """
-        username_field = getattr(get_user_model(), 'USERNAME_FIELD', 'username')
         credentials = {
-            username_field: userid,
+            get_user_model().USERNAME_FIELD: userid,
             'password': password
         }
         user = authenticate(**credentials)
@@ -119,9 +117,8 @@ class SessionAuthentication(BaseAuthentication):
         Otherwise returns `None`.
         """
 
-        # Get the underlying HttpRequest object
-        request = request._request
-        user = getattr(request, 'user', None)
+        # Get the session-based user from the underlying HttpRequest object
+        user = getattr(request._request, 'user', None)
 
         # Unauthenticated, CSRF validation not required
         if not user or not user.is_active:

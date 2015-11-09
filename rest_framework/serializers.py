@@ -21,6 +21,7 @@ from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
 
 from rest_framework.compat import DurationField as ModelDurationField
+from rest_framework.compat import JSONField as ModelJSONField
 from rest_framework.compat import postgres_fields, unicode_to_repr
 from rest_framework.utils import model_meta
 from rest_framework.utils.field_mapping import (
@@ -49,9 +50,11 @@ from rest_framework.relations import *  # NOQA # isort:skip
 # rather than the parent serializer.
 LIST_SERIALIZER_KWARGS = (
     'read_only', 'write_only', 'required', 'default', 'initial', 'source',
-    'label', 'help_text', 'style', 'error_messages',
-    'instance', 'data', 'partial', 'context'
+    'label', 'help_text', 'style', 'error_messages', 'allow_empty',
+    'instance', 'data', 'partial', 'context', 'allow_null'
 )
+
+ALL_FIELDS = '__all__'
 
 
 # BaseSerializer
@@ -115,12 +118,17 @@ class BaseSerializer(Field):
             kwargs['child'] = cls()
             return CustomListSerializer(*args, **kwargs)
         """
+        allow_empty = kwargs.pop('allow_empty', None)
         child_serializer = cls(*args, **kwargs)
-        list_kwargs = {'child': child_serializer}
-        list_kwargs.update(dict([
-            (key, value) for key, value in kwargs.items()
+        list_kwargs = {
+            'child': child_serializer,
+        }
+        if allow_empty is not None:
+            list_kwargs['allow_empty'] = allow_empty
+        list_kwargs.update({
+            key: value for key, value in kwargs.items()
             if key in LIST_SERIALIZER_KWARGS
-        ]))
+        })
         meta = getattr(cls, 'Meta', None)
         list_serializer_class = getattr(meta, 'list_serializer_class', ListSerializer)
         return list_serializer_class(*args, **list_kwargs)
@@ -151,6 +159,22 @@ class BaseSerializer(Field):
 
         assert not self.errors, (
             'You cannot call `.save()` on a serializer with invalid data.'
+        )
+
+        # Guard against incorrect use of `serializer.save(commit=False)`
+        assert 'commit' not in kwargs, (
+            "'commit' is not a valid keyword argument to the 'save()' method. "
+            "If you need to access data before committing to the database then "
+            "inspect 'serializer.validated_data' instead. "
+            "You can also pass additional keyword arguments to 'save()' if you "
+            "need to set extra attributes on the saved model instance. "
+            "For example: 'serializer.save(owner=request.user)'.'"
+        )
+
+        assert not hasattr(self, '_data'), (
+            "You cannot call `.save()` after accessing `serializer.data`."
+            "If you need to access data before committing to the database then "
+            "inspect 'serializer.validated_data' instead. "
         )
 
         validated_data = dict(
@@ -194,7 +218,7 @@ class BaseSerializer(Field):
                 self._errors = {}
 
         if self._errors and raise_exception:
-            raise ValidationError(self._errors)
+            raise ValidationError(self.errors)
 
         return not bool(self._errors)
 
@@ -281,10 +305,10 @@ def get_validation_error_detail(exc):
     elif isinstance(exc.detail, dict):
         # If errors may be a dict we use the standard {key: list of values}.
         # Here we ensure that all the values are *lists* of errors.
-        return dict([
-            (key, value if isinstance(value, list) else [value])
+        return {
+            key: value if isinstance(value, list) else [value]
             for key, value in exc.detail.items()
-        ])
+        }
     elif isinstance(exc.detail, list):
         # Errors raised as a list are non-field errors.
         return {
@@ -493,11 +517,13 @@ class ListSerializer(BaseSerializer):
     many = True
 
     default_error_messages = {
-        'not_a_list': _('Expected a list of items but got type "{input_type}".')
+        'not_a_list': _('Expected a list of items but got type "{input_type}".'),
+        'empty': _('This list may not be empty.')
     }
 
     def __init__(self, *args, **kwargs):
         self.child = kwargs.pop('child', copy.deepcopy(self.child))
+        self.allow_empty = kwargs.pop('allow_empty', True)
         assert self.child is not None, '`child` is a required argument.'
         assert not inspect.isclass(self.child), '`child` has not been instantiated.'
         super(ListSerializer, self).__init__(*args, **kwargs)
@@ -553,6 +579,12 @@ class ListSerializer(BaseSerializer):
                 api_settings.NON_FIELD_ERRORS_KEY: [message]
             })
 
+        if not self.allow_empty and len(data) == 0:
+            message = self.error_messages['empty']
+            raise ValidationError({
+                api_settings.NON_FIELD_ERRORS_KEY: [message]
+            })
+
         ret = []
         errors = []
 
@@ -603,6 +635,16 @@ class ListSerializer(BaseSerializer):
         """
         Save and return a list of object instances.
         """
+        # Guard against incorrect use of `serializer.save(commit=False)`
+        assert 'commit' not in kwargs, (
+            "'commit' is not a valid keyword argument to the 'save()' method. "
+            "If you need to access data before committing to the database then "
+            "inspect 'serializer.validated_data' instead. "
+            "You can also pass additional keyword arguments to 'save()' if you "
+            "need to set extra attributes on the saved model instance. "
+            "For example: 'serializer.save(owner=request.user)'.'"
+        )
+
         validated_data = [
             dict(list(attrs.items()) + list(kwargs.items()))
             for attrs in self.validated_data
@@ -745,10 +787,14 @@ class ModelSerializer(Serializer):
         models.TimeField: TimeField,
         models.URLField: URLField,
         models.GenericIPAddressField: IPAddressField,
+        models.FilePathField: FilePathField,
     }
     if ModelDurationField is not None:
         serializer_field_mapping[ModelDurationField] = DurationField
+    if ModelJSONField is not None:
+        serializer_field_mapping[ModelJSONField] = JSONField
     serializer_related_field = PrimaryKeyRelatedField
+    serializer_related_to_field = SlugRelatedField
     serializer_url_field = HyperlinkedIdentityField
     serializer_choice_field = ChoiceField
 
@@ -759,7 +805,7 @@ class ModelSerializer(Serializer):
     # you'll also need to ensure you update the `create` method on any generic
     # views, to correctly handle the 'Location' response header for
     # "HTTP 201 Created" responses.
-    url_field_name = api_settings.URL_FIELD_NAME
+    url_field_name = None
 
     # Default `create` and `update` behavior...
     def create(self, validated_data):
@@ -842,6 +888,9 @@ class ModelSerializer(Serializer):
         Return the dict of field names -> field instances that should be
         used for `self.fields` when instantiating the serializer.
         """
+        if self.url_field_name is None:
+            self.url_field_name = api_settings.URL_FIELD_NAME
+
         assert hasattr(self, 'Meta'), (
             'Class {serializer_class} missing "Meta" attribute'.format(
                 serializer_class=self.__class__.__name__
@@ -916,10 +965,10 @@ class ModelSerializer(Serializer):
         fields = getattr(self.Meta, 'fields', None)
         exclude = getattr(self.Meta, 'exclude', None)
 
-        if fields and not isinstance(fields, (list, tuple)):
+        if fields and fields != ALL_FIELDS and not isinstance(fields, (list, tuple)):
             raise TypeError(
-                'The `fields` option must be a list or tuple. Got %s.' %
-                type(fields).__name__
+                'The `fields` option must be a list or tuple or "__all__". '
+                'Got %s.' % type(fields).__name__
             )
 
         if exclude and not isinstance(exclude, (list, tuple)):
@@ -934,6 +983,20 @@ class ModelSerializer(Serializer):
                 serializer_class=self.__class__.__name__
             )
         )
+
+        if fields is None and exclude is None:
+            warnings.warn(
+                "Creating a ModelSerializer without either the 'fields' "
+                "attribute or the 'exclude' attribute is pending deprecation "
+                "since 3.3.0. Add an explicit fields = '__all__' to the "
+                "{serializer_class} serializer.".format(
+                    serializer_class=self.__class__.__name__
+                ),
+                PendingDeprecationWarning
+            )
+
+        if fields == ALL_FIELDS:
+            fields = None
 
         if fields is not None:
             # Ensure that all declared fields have also been included in the
@@ -1025,6 +1088,19 @@ class ModelSerializer(Serializer):
             # Fields with choices get coerced into `ChoiceField`
             # instead of using their regular typed field.
             field_class = self.serializer_choice_field
+            # Some model fields may introduce kwargs that would not be valid
+            # for the choice field. We need to strip these out.
+            # Eg. models.DecimalField(max_digits=3, decimal_places=1, choices=DECIMAL_CHOICES)
+            valid_kwargs = set((
+                'read_only', 'write_only',
+                'required', 'default', 'initial', 'source',
+                'label', 'help_text', 'style',
+                'error_messages', 'validators', 'allow_null', 'allow_blank',
+                'choices'
+            ))
+            for key in list(field_kwargs.keys()):
+                if key not in valid_kwargs:
+                    field_kwargs.pop(key)
 
         if not issubclass(field_class, ModelField):
             # `model_field` is only valid for the fallback case of
@@ -1053,6 +1129,11 @@ class ModelSerializer(Serializer):
         """
         field_class = self.serializer_related_field
         field_kwargs = get_relation_kwargs(field_name, relation_info)
+
+        to_field = field_kwargs.pop('to_field', None)
+        if to_field and not relation_info.related_model._meta.get_field(to_field).primary_key:
+            field_kwargs['slug_field'] = to_field
+            field_class = self.serializer_related_to_field
 
         # `view_name` is only valid for hyperlinked relationships.
         if not issubclass(field_class, HyperlinkedRelatedField):
@@ -1140,44 +1221,6 @@ class ModelSerializer(Serializer):
                 kwargs['read_only'] = True
                 extra_kwargs[field_name] = kwargs
 
-        # These are all pending deprecation.
-        write_only_fields = getattr(self.Meta, 'write_only_fields', None)
-        if write_only_fields is not None:
-            warnings.warn(
-                "The `Meta.write_only_fields` option is deprecated. "
-                "Use `Meta.extra_kwargs={<field_name>: {'write_only': True}}` instead.",
-                DeprecationWarning,
-                stacklevel=3
-            )
-            for field_name in write_only_fields:
-                kwargs = extra_kwargs.get(field_name, {})
-                kwargs['write_only'] = True
-                extra_kwargs[field_name] = kwargs
-
-        view_name = getattr(self.Meta, 'view_name', None)
-        if view_name is not None:
-            warnings.warn(
-                "The `Meta.view_name` option is deprecated. "
-                "Use `Meta.extra_kwargs={'url': {'view_name': ...}}` instead.",
-                DeprecationWarning,
-                stacklevel=3
-            )
-            kwargs = extra_kwargs.get(self.url_field_name, {})
-            kwargs['view_name'] = view_name
-            extra_kwargs[self.url_field_name] = kwargs
-
-        lookup_field = getattr(self.Meta, 'lookup_field', None)
-        if lookup_field is not None:
-            warnings.warn(
-                "The `Meta.lookup_field` option is deprecated. "
-                "Use `Meta.extra_kwargs={'url': {'lookup_field': ...}}` instead.",
-                DeprecationWarning,
-                stacklevel=3
-            )
-            kwargs = extra_kwargs.get(self.url_field_name, {})
-            kwargs['lookup_field'] = lookup_field
-            extra_kwargs[self.url_field_name] = kwargs
-
         return extra_kwargs
 
     def get_uniqueness_extra_kwargs(self, field_names, declared_fields, extra_kwargs):
@@ -1200,13 +1243,10 @@ class ModelSerializer(Serializer):
 
         for model_field in model_fields.values():
             # Include each of the `unique_for_*` field names.
-            unique_constraint_names |= set([
-                model_field.unique_for_date,
-                model_field.unique_for_month,
-                model_field.unique_for_year
-            ])
+            unique_constraint_names |= {model_field.unique_for_date, model_field.unique_for_month,
+                                        model_field.unique_for_year}
 
-        unique_constraint_names -= set([None])
+        unique_constraint_names -= {None}
 
         # Include each of the `unique_together` field names,
         # so long as all the field names are included on the serializer.
@@ -1320,10 +1360,10 @@ class ModelSerializer(Serializer):
         # which may map onto a model field. Any dotted field name lookups
         # cannot map to a field, and must be a traversal, so we're not
         # including those.
-        field_names = set([
+        field_names = {
             field.source for field in self.fields.values()
             if (field.source != '*') and ('.' not in field.source)
-        ])
+        }
 
         # Note that we make sure to check `unique_together` both on the
         # base model class, but also on any parent classes.
@@ -1389,7 +1429,7 @@ if hasattr(models, 'IPAddressField'):
 
 if postgres_fields:
     class CharMappingField(DictField):
-        child = CharField()
+        child = CharField(allow_blank=True)
 
     ModelSerializer.serializer_field_mapping[postgres_fields.HStoreField] = CharMappingField
     ModelSerializer.serializer_field_mapping[postgres_fields.ArrayField] = ListField

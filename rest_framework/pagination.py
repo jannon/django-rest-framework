@@ -5,9 +5,8 @@ be used for paginated responses.
 """
 from __future__ import unicode_literals
 
-import warnings
 from base64 import b64decode, b64encode
-from collections import namedtuple
+from collections import OrderedDict, namedtuple
 
 from django.core.paginator import Paginator as DjangoPaginator
 from django.core.paginator import InvalidPage
@@ -16,7 +15,6 @@ from django.utils import six
 from django.utils.six.moves.urllib import parse as urlparse
 from django.utils.translation import ugettext_lazy as _
 
-from rest_framework.compat import OrderedDict
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -80,11 +78,7 @@ def _get_displayed_page_numbers(current, final):
 
     # We always include the first two pages, last two pages, and
     # two pages either side of the current page.
-    included = set((
-        1,
-        current - 1, current, current + 1,
-        final
-    ))
+    included = {1, current - 1, current, current + 1, final}
 
     # If the break would only exclude a single page number then we
     # may as well include the page number instead of the break.
@@ -158,6 +152,9 @@ class BasePagination(object):
     def to_html(self):  # pragma: no cover
         raise NotImplementedError('to_html() must be implemented to display page controls.')
 
+    def get_results(self, data):
+        return data['results']
+
 
 class PageNumberPagination(BasePagination):
     """
@@ -188,62 +185,11 @@ class PageNumberPagination(BasePagination):
 
     invalid_page_message = _('Invalid page "{page_number}": {message}.')
 
-    def _handle_backwards_compat(self, view):
-        """
-        Prior to version 3.1, pagination was handled in the view, and the
-        attributes were set there. The attributes should now be set on
-        the pagination class, but the old style is still pending deprecation.
-        """
-        assert not (
-            getattr(view, 'pagination_serializer_class', None) or
-            getattr(api_settings, 'DEFAULT_PAGINATION_SERIALIZER_CLASS', None)
-        ), (
-            "The pagination_serializer_class attribute and "
-            "DEFAULT_PAGINATION_SERIALIZER_CLASS setting have been removed as "
-            "part of the 3.1 pagination API improvement. See the pagination "
-            "documentation for details on the new API."
-        )
-
-        for (settings_key, attr_name) in (
-            ('PAGINATE_BY', 'page_size'),
-            ('PAGINATE_BY_PARAM', 'page_size_query_param'),
-            ('MAX_PAGINATE_BY', 'max_page_size')
-        ):
-            value = getattr(api_settings, settings_key, None)
-            if value is not None:
-                setattr(self, attr_name, value)
-                warnings.warn(
-                    "The `%s` settings key is pending deprecation. "
-                    "Use the `%s` attribute on the pagination class instead." % (
-                        settings_key, attr_name
-                    ),
-                    PendingDeprecationWarning,
-                )
-
-        for (view_attr, attr_name) in (
-            ('paginate_by', 'page_size'),
-            ('page_query_param', 'page_query_param'),
-            ('paginate_by_param', 'page_size_query_param'),
-            ('max_paginate_by', 'max_page_size')
-        ):
-            value = getattr(view, view_attr, None)
-            if value is not None:
-                setattr(self, attr_name, value)
-                warnings.warn(
-                    "The `%s` view attribute is pending deprecation. "
-                    "Use the `%s` attribute on the pagination class instead." % (
-                        view_attr, attr_name
-                    ),
-                    PendingDeprecationWarning,
-                )
-
     def paginate_queryset(self, queryset, request, view=None):
         """
         Paginate a queryset if required, either returning a
         page object, or `None` if pagination is not configured for this view.
         """
-        self._handle_backwards_compat(view)
-
         page_size = self.get_page_size(request)
         if not page_size:
             return None
@@ -261,7 +207,7 @@ class PageNumberPagination(BasePagination):
             )
             raise NotFound(msg)
 
-        if paginator.count > 1 and self.template is not None:
+        if paginator.num_pages > 1 and self.template is not None:
             # The browsable API should display pagination controls.
             self.display_page_controls = True
 
@@ -419,6 +365,11 @@ class LimitOffsetPagination(BasePagination):
             _divide_with_ceil(self.count - self.offset, self.limit) +
             _divide_with_ceil(self.offset, self.limit)
         )
+        if final < 1:
+            final = 1
+
+        if current > final:
+            current = final
 
         def page_number_to_url(page_number):
             if page_number == 1:
@@ -455,8 +406,8 @@ class CursorPagination(BasePagination):
     template = 'rest_framework/pagination/previous_and_next.html'
 
     def paginate_queryset(self, queryset, request, view=None):
-        page_size = self.get_page_size(request)
-        if not page_size:
+        self.page_size = self.get_page_size(request)
+        if not self.page_size:
             return None
 
         self.base_url = request.build_absolute_uri()
@@ -491,8 +442,8 @@ class CursorPagination(BasePagination):
         # If we have an offset cursor then offset the entire page by that amount.
         # We also always fetch an extra item in order to determine if there is a
         # page following on from this one.
-        results = list(queryset[offset:offset + page_size + 1])
-        self.page = list(results[:page_size])
+        results = list(queryset[offset:offset + self.page_size + 1])
+        self.page = list(results[:self.page_size])
 
         # Determine the position of the final item following the page.
         if len(results) > len(self.page):
@@ -658,6 +609,11 @@ class CursorPagination(BasePagination):
             assert ordering is not None, (
                 'Using cursor pagination, but no ordering attribute was declared '
                 'on the pagination class.'
+            )
+            assert '__' not in ordering, (
+                'Cursor pagination does not support double underscore lookups '
+                'for orderings. Orderings should be an unchanging, unique or '
+                'nearly-unique field on the model, such as "-created" or "pk".'
             )
 
         assert isinstance(ordering, (six.string_types, list, tuple)), (

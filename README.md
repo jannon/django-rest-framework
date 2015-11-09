@@ -1,6 +1,7 @@
 # [Django REST framework][docs]
 
 [![build-status-image]][travis]
+[![coverage-status-image]][codecov]
 [![pypi-version]][pypi]
 
 **Awesome web-browsable Web APIs.**
@@ -9,9 +10,9 @@ Full documentation for the project is available at [http://www.django-rest-frame
 
 ---
 
-**Note**: We have now released Django REST framework 3.1. For older codebases you may want to refer to the version 2.4.4 [source code](https://github.com/tomchristie/django-rest-framework/tree/version-2.4.x), and [documentation](http://tomchristie.github.io/rest-framework-2-docs/).
+**Note**: We have now released Django REST framework 3.3. For older codebases you may want to refer to the version 2.4.4 [source code][2.4-code], and [documentation][2.4-docs].
 
-For more details see the [3.1 release notes][3.1-announcement]
+For more details see the 3.3 [announcement][3.3-announcement] and [release notes][3.3-release-notes].
 
 ---
 
@@ -35,8 +36,8 @@ There is a live example API for testing purposes, [available here][sandbox].
 
 # Requirements
 
-* Python (2.6.5+, 2.7, 3.2, 3.3, 3.4)
-* Django (1.4.11+, 1.5.6+, 1.6.3+, 1.7, 1.8)
+* Python (2.7, 3.2, 3.3, 3.4, 3.5)
+* Django (1.7, 1.8, 1.9)
 
 # Installation
 
@@ -156,9 +157,10 @@ If you believe you’ve found something in Django REST framework which has secur
 
 Send a description of the issue via email to [rest-framework-security@googlegroups.com][security-mail].  The project maintainers will then work with you to resolve any issues where required, prior to any public disclosure.
 
-
 [build-status-image]: https://secure.travis-ci.org/tomchristie/django-rest-framework.svg?branch=master
 [travis]: http://travis-ci.org/tomchristie/django-rest-framework?branch=master
+[coverage-status-image]: https://img.shields.io/codecov/c/github/tomchristie/django-rest-framework/master.svg
+[codecov]: http://codecov.io/github/tomchristie/django-rest-framework?branch=master
 [pypi-version]: https://img.shields.io/pypi/v/djangorestframework.svg
 [pypi]: https://pypi.python.org/pypi/djangorestframework
 [twitter]: https://twitter.com/_tomchristie
@@ -179,4 +181,7 @@ Send a description of the issue via email to [rest-framework-security@googlegrou
 
 [docs]: http://www.django-rest-framework.org/
 [security-mail]: mailto:rest-framework-security@googlegroups.com
-[3.1-announcement]: http://www.django-rest-framework.org/topics/3.1-announcement/
+[2.4-code]: https://github.com/tomchristie/django-rest-framework/tree/version-2.4.x
+[2.4-docs]: http://tomchristie.github.io/rest-framework-2-docs/
+[3.3-announcement]: http://www.django-rest-framework.org/topics/3.3-announcement/
+[3.3-release-notes]: http://www.django-rest-framework.org/topics/release-notes/#33x-series

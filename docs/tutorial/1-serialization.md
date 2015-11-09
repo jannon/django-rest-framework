@@ -89,7 +89,6 @@ We'll also need to create an initial migration for our snippet model, and sync t
 
 The first thing we need to get started on our Web API is to provide a way of serializing and deserializing the snippet instances into representations such as `json`.  We can do this by declaring serializers that work very similar to Django's forms.  Create a file in the `snippets` directory named `serializers.py` and add the following.
 
-    from django.forms import widgets
     from rest_framework import serializers
     from snippets.models import Snippet, LANGUAGE_CHOICES, STYLE_CHOICES
 
@@ -182,7 +181,7 @@ We can also serialize querysets instead of model instances.  To do so we simply 
 
     serializer = SnippetSerializer(Snippet.objects.all(), many=True)
     serializer.data
-    # [{'pk': 1, 'title': u'', 'code': u'foo = "bar"\n', 'linenos': False, 'language': u'python', 'style': u'friendly'}, {'pk': 2, 'title': u'', 'code': u'print "hello, world"\n', 'linenos': False, 'language': u'python', 'style': u'friendly'}]
+    # [OrderedDict([('pk', 1), ('title', u''), ('code', u'foo = "bar"\n'), ('linenos', False), ('language', 'python'), ('style', 'friendly')]), OrderedDict([('pk', 2), ('title', u''), ('code', u'print "hello, world"\n'), ('linenos', False), ('language', 'python'), ('style', 'friendly')]), OrderedDict([('pk', 3), ('title', u''), ('code', u'print "hello, world"'), ('linenos', False), ('language', 'python'), ('style', 'friendly')])]
 
 ## Using ModelSerializers
 
@@ -318,7 +317,7 @@ Quit out of the shell...
 	Validating models...
 
 	0 errors found
-	Django version 1.4.3, using settings 'tutorial.settings'
+	Django version 1.8.3, using settings 'tutorial.settings'
 	Development server is running at http://127.0.0.1:8000/
 	Quit the server with CONTROL-C.
 

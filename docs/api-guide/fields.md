@@ -20,7 +20,7 @@ Each serializer field class constructor takes at least these arguments.  Some Fi
 
 ### `read_only`
 
-Read-only fields are included in the API output, but should not be included in the input during create or update operations. Any 'read_only' fields that are incorrectly included in the serializer input will be ignored. 
+Read-only fields are included in the API output, but should not be included in the input during create or update operations. Any 'read_only' fields that are incorrectly included in the serializer input will be ignored.
 
 Set this to `True` to ensure that the field is used when serializing a representation, but is not used when creating or updating an instance during deserialization.
 
@@ -51,13 +51,13 @@ Defaults to `False`
 
 If set, this gives the default value that will be used for the field if no input value is supplied.  If not set the default behavior is to not populate the attribute at all.
 
-May be set to a function or other callable, in which case the value will be evaluated each time it is used.
+May be set to a function or other callable, in which case the value will be evaluated each time it is used. When called, it will receive no arguments. If the callable has a `set_context` method, that will be called each time before getting the value with the field instance as only argument. This works the same way as for [validators](validators.md#using-set_context).
 
 Note that setting a `default` value implies that the field is not required. Including both the `default` and `required` keyword arguments is invalid and will raise an error.
 
 ### `source`
 
-The name of the attribute that will be used to populate the field.  May be a method that only takes a `self` argument, such as `URLField('get_absolute_url')`, or may use dotted notation to traverse attributes, such as `EmailField(source='user.email')`.
+The name of the attribute that will be used to populate the field.  May be a method that only takes a `self` argument, such as `URLField(source='get_absolute_url')`, or may use dotted notation to traverse attributes, such as `EmailField(source='user.email')`.
 
 The value `source='*'` has a special meaning, and is used to indicate that the entire object should be passed through to the field.  This can be useful for creating nested representations, or for fields which require access to the complete object in order to determine the output representation.
 
@@ -85,9 +85,9 @@ A value that should be used for pre-populating the value of HTML form fields.
 
 ### `style`
 
-A dictionary of key-value pairs that can be used to control how renderers should render the field. The API for this should still be considered experimental, and will be formalized with the 3.1 release.
+A dictionary of key-value pairs that can be used to control how renderers should render the field.
 
-Two options are currently used in HTML form generation, `'input_type'` and `'base_template'`.
+Two examples here are `'input_type'` and `'base_template'`:
 
     # Use <input type="password"> for the input.
     password = serializers.CharField(
@@ -100,7 +100,7 @@ Two options are currently used in HTML form generation, `'input_type'` and `'bas
         style = {'base_template': 'radio.html'}
     }
 
-**Note**: The `style` argument replaces the old-style version 2.x `widget` keyword argument. Because REST framework 3 now uses templated HTML form generation, the `widget` option that was used to support Django built-in widgets can no longer be supported. Version 3.1 is planned to include public API support for customizing HTML form generation.
+For more details see the [HTML & Forms][html-and-forms] documentation.
 
 ---
 
@@ -193,6 +193,20 @@ A field that ensures the input is a valid UUID string. The `to_internal_value` m
     - `'int'` - A 128 bit integer representation of the UUID: `"123456789012312313134124512351145145114"`
     - `'urn'` - RFC 4122 URN representation of the UUID: `"urn:uuid:5ce0e9a5-5ffa-654b-cee0-1238041fb31a"`
   Changing the `format` parameters only affects representation values. All formats are accepted by `to_internal_value`
+
+## FilePathField
+
+A field whose choices are limited to the filenames in a certain directory on the filesystem
+
+Corresponds to `django.forms.fields.FilePathField`.
+
+**Signature:** `FilePathField(path, match=None, recursive=False, allow_files=True, allow_folders=False, required=None, **kwargs)`
+
+- `path` - The absolute filesystem path to a directory from which this FilePathField should get its choice.
+- `match` - A regular expression, as a string, that FilePathField will use to filter filenames.
+- `recursive` - Specifies whether all subdirectories of path should be included.  Default is `False`.
+- `allow_files` - Specifies whether files in the specified location should be included. Default is `True`. Either this or `allow_folders` must be `True`.
+- `allow_folders` - Specifies whether folders in the specified location should be included. Default is `False`. Either this or `allow_files` must be `True`.
 
 ## IPAddressField
 
@@ -350,6 +364,8 @@ Used by `ModelSerializer` to automatically generate fields if the corresponding 
 
 - `choices` - A list of valid values, or a list of `(key, display_name)` tuples.
 - `allow_blank` - If set to `True` then the empty string should be considered a valid value. If set to `False` then the empty string is considered invalid and will raise a validation error. Defaults to `False`.
+- `html_cutoff` - If set this will be the maximum number of choices that will be displayed by a HTML select drop down. Can be used to ensure that automatically generated ChoiceFields with very large possible selections do not prevent a template from rendering. Defaults to `None`.
+- `html_cutoff_text` - If set this will display a textual indicator if the maximum number of items have been cutoff in an HTML select drop down. Defaults to `"More than {count} items…"`
 
 Both the `allow_blank` and `allow_null` are valid options on `ChoiceField`, although it is highly recommended that you only use one and not both. `allow_blank` should be preferred for textual choices, and `allow_null` should be preferred for numeric or other non-textual choices.
 
@@ -361,6 +377,8 @@ A field that can accept a set of zero, one or many values, chosen from a limited
 
 - `choices` - A list of valid values, or a list of `(key, display_name)` tuples.
 - `allow_blank` - If set to `True` then the empty string should be considered a valid value. If set to `False` then the empty string is considered invalid and will raise a validation error. Defaults to `False`.
+- `html_cutoff` - If set this will be the maximum number of choices that will be displayed by a HTML select drop down. Can be used to ensure that automatically generated ChoiceFields with very large possible selections do not prevent a template from rendering. Defaults to `None`.
+- `html_cutoff_text` - If set this will display a textual indicator if the maximum number of items have been cutoff in an HTML select drop down. Defaults to `"More than {count} items…"`
 
 As with `ChoiceField`, both the `allow_blank` and `allow_null` options are valid, although it is highly recommended that you only use one and not both. `allow_blank` should be preferred for textual choices, and `allow_null` should be preferred for numeric or other non-textual choices.
 
@@ -440,6 +458,14 @@ You can also use the declarative style, as with `ListField`. For example:
 
     class DocumentField(DictField):
         child = CharField()
+
+## JSONField
+
+A field class that validates that the incoming data structure consists of valid JSON primitives. In its alternate binary mode, it will represent and validate JSON-encoded binary strings.
+
+**Signature**: `JSONField(binary)`
+
+- `binary` - If set to `True` then the field will output and validate a JSON encoded string, rather than a primitive data structure. Defaults to `False`.
 
 ---
 
@@ -546,7 +572,7 @@ Let's look at an example of serializing a class that represents an RGB color val
 
 By default field values are treated as mapping to an attribute on the object.  If you need to customize how the field value is accessed and set you need to override `.get_attribute()` and/or `.get_value()`.
 
-As an example, let's create a field that can be used represent the class name of the object being serialized:
+As an example, let's create a field that can be used to represent the class name of the object being serialized:
 
     class ClassNameField(serializers.Field):
         def get_attribute(self, obj):
@@ -632,6 +658,7 @@ The [django-rest-framework-gis][django-rest-framework-gis] package provides geog
 The [django-rest-framework-hstore][django-rest-framework-hstore] package provides an `HStoreField` to support [django-hstore][django-hstore] `DictionaryField` model field.
 
 [cite]: https://docs.djangoproject.com/en/dev/ref/forms/api/#django.forms.Form.cleaned_data
+[html-and-forms]: ../topics/html-and-forms.md
 [FILE_UPLOAD_HANDLERS]: https://docs.djangoproject.com/en/dev/ref/settings/#std:setting-FILE_UPLOAD_HANDLERS
 [ecma262]: http://ecma-international.org/ecma-262/5.1/#sec-15.9.1.15
 [strftime]: http://docs.python.org/2/library/datetime.html#strftime-and-strptime-behavior

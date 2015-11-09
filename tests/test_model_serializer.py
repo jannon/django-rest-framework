@@ -7,6 +7,9 @@ an appropriate set of serializer fields for each case.
 """
 from __future__ import unicode_literals
 
+import decimal
+from collections import OrderedDict
+
 import django
 import pytest
 from django.core.exceptions import ImproperlyConfigured
@@ -19,7 +22,7 @@ from django.utils import six
 
 from rest_framework import serializers
 from rest_framework.compat import DurationField as ModelDurationField
-from rest_framework.compat import unicode_repr
+from rest_framework.compat import DecimalValidator, unicode_repr
 
 
 def dedent(blocktext):
@@ -60,16 +63,18 @@ class RegularFieldsModel(models.Model):
     positive_small_integer_field = models.PositiveSmallIntegerField()
     slug_field = models.SlugField(max_length=100)
     small_integer_field = models.SmallIntegerField()
-    text_field = models.TextField()
+    text_field = models.TextField(max_length=100)
     time_field = models.TimeField()
     url_field = models.URLField(max_length=100)
     custom_field = CustomField()
+    file_path_field = models.FilePathField(path='/tmp/')
 
     def method(self):
         return 'method'
 
 
 COLOR_CHOICES = (('red', 'Red'), ('blue', 'Blue'), ('green', 'Green'))
+DECIMAL_CHOICES = (('low', decimal.Decimal('0.1')), ('medium', decimal.Decimal('0.5')), ('high', decimal.Decimal('0.9')))
 
 
 class FieldOptionsModel(models.Model):
@@ -80,6 +85,10 @@ class FieldOptionsModel(models.Model):
     default_field = models.IntegerField(default=0)
     descriptive_field = models.IntegerField(help_text='Some help text', verbose_name='A label')
     choices_field = models.CharField(max_length=100, choices=COLOR_CHOICES)
+
+
+class ChoicesModel(models.Model):
+    choices_field_with_nonstandard_args = models.DecimalField(max_digits=3, decimal_places=1, choices=DECIMAL_CHOICES, verbose_name='A label')
 
 
 class TestModelSerializer(TestCase):
@@ -153,11 +162,13 @@ class TestRegularFieldMappings(TestCase):
                 positive_small_integer_field = IntegerField()
                 slug_field = SlugField(max_length=100)
                 small_integer_field = IntegerField()
-                text_field = CharField(style={'base_template': 'textarea.html'})
+                text_field = CharField(max_length=100, style={'base_template': 'textarea.html'})
                 time_field = TimeField()
                 url_field = URLField(max_length=100)
                 custom_field = ModelField(model_field=<tests.test_model_serializer.CustomField: custom_field>)
+                file_path_field = FilePathField(path='/tmp/')
         """)
+
         self.assertEqual(unicode_repr(TestSerializer()), expected)
 
     def test_field_options(self):
@@ -174,7 +185,7 @@ class TestRegularFieldMappings(TestCase):
                 null_field = IntegerField(allow_null=True, required=False)
                 default_field = IntegerField(required=False)
                 descriptive_field = IntegerField(help_text='Some help text', label='A label')
-                choices_field = ChoiceField(choices=[('red', 'Red'), ('blue', 'Blue'), ('green', 'Green')])
+                choices_field = ChoiceField(choices=(('red', 'Red'), ('blue', 'Blue'), ('green', 'Green')))
         """)
         if six.PY2:
             # This particular case is too awkward to resolve fully across
@@ -307,6 +318,28 @@ class TestRegularFieldMappings(TestCase):
 
         ChildSerializer().fields
 
+    def test_choices_with_nonstandard_args(self):
+        class ExampleSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = ChoicesModel
+
+        ExampleSerializer()
+
+    def test_fields_and_exclude_behavior(self):
+        class ImplicitFieldsSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = RegularFieldsModel
+
+        class ExplicitFieldsSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = RegularFieldsModel
+                fields = '__all__'
+
+        implicit = ImplicitFieldsSerializer()
+        explicit = ExplicitFieldsSerializer()
+
+        assert implicit.data == explicit.data
+
 
 @pytest.mark.skipif(django.VERSION < (1, 8),
                     reason='DurationField is only available for django1.8+')
@@ -328,6 +361,22 @@ class TestDurationFieldMapping(TestCase):
                 duration_field = DurationField()
         """)
         self.assertEqual(unicode_repr(TestSerializer()), expected)
+
+
+class TestGenericIPAddressFieldValidation(TestCase):
+    def test_ip_address_validation(self):
+        class IPAddressFieldModel(models.Model):
+            address = models.GenericIPAddressField()
+
+        class TestSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = IPAddressFieldModel
+
+        s = TestSerializer(data={'address': 'not an ip address'})
+        self.assertFalse(s.is_valid())
+        self.assertEquals(1, len(s.errors['address']),
+                          'Unexpected number of validation errors: '
+                          '{0}'.format(s.errors))
 
 
 # Tests for relational field mappings.
@@ -381,7 +430,7 @@ class TestRelationalFieldMappings(TestCase):
                 id = IntegerField(label='ID', read_only=True)
                 foreign_key = PrimaryKeyRelatedField(queryset=ForeignKeyTargetModel.objects.all())
                 one_to_one = PrimaryKeyRelatedField(queryset=OneToOneTargetModel.objects.all(), validators=[<UniqueValidator(queryset=RelationalModel.objects.all())>])
-                many_to_many = PrimaryKeyRelatedField(many=True, queryset=ManyToManyTargetModel.objects.all())
+                many_to_many = PrimaryKeyRelatedField(allow_empty=False, many=True, queryset=ManyToManyTargetModel.objects.all())
                 through = PrimaryKeyRelatedField(many=True, read_only=True)
         """)
         self.assertEqual(unicode_repr(TestSerializer()), expected)
@@ -420,7 +469,7 @@ class TestRelationalFieldMappings(TestCase):
                 url = HyperlinkedIdentityField(view_name='relationalmodel-detail')
                 foreign_key = HyperlinkedRelatedField(queryset=ForeignKeyTargetModel.objects.all(), view_name='foreignkeytargetmodel-detail')
                 one_to_one = HyperlinkedRelatedField(queryset=OneToOneTargetModel.objects.all(), validators=[<UniqueValidator(queryset=RelationalModel.objects.all())>], view_name='onetoonetargetmodel-detail')
-                many_to_many = HyperlinkedRelatedField(many=True, queryset=ManyToManyTargetModel.objects.all(), view_name='manytomanytargetmodel-detail')
+                many_to_many = HyperlinkedRelatedField(allow_empty=False, many=True, queryset=ManyToManyTargetModel.objects.all(), view_name='manytomanytargetmodel-detail')
                 through = HyperlinkedRelatedField(many=True, read_only=True, view_name='throughtargetmodel-detail')
         """)
         self.assertEqual(unicode_repr(TestSerializer()), expected)
@@ -530,6 +579,50 @@ class TestRelationalFieldMappings(TestCase):
                 reverse_through = PrimaryKeyRelatedField(many=True, read_only=True)
         """)
         self.assertEqual(unicode_repr(TestSerializer()), expected)
+
+
+class DisplayValueTargetModel(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return '%s Color' % (self.name)
+
+
+class DisplayValueModel(models.Model):
+    color = models.ForeignKey(DisplayValueTargetModel)
+
+
+class TestRelationalFieldDisplayValue(TestCase):
+    def setUp(self):
+        DisplayValueTargetModel.objects.bulk_create([
+            DisplayValueTargetModel(name='Red'),
+            DisplayValueTargetModel(name='Yellow'),
+            DisplayValueTargetModel(name='Green'),
+        ])
+
+    def test_default_display_value(self):
+        class TestSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = DisplayValueModel
+
+        serializer = TestSerializer()
+        expected = OrderedDict([('1', 'Red Color'), ('2', 'Yellow Color'), ('3', 'Green Color')])
+        self.assertEqual(serializer.fields['color'].choices, expected)
+
+    def test_custom_display_value(self):
+        class TestField(serializers.PrimaryKeyRelatedField):
+            def display_value(self, instance):
+                return 'My %s Color' % (instance.name)
+
+        class TestSerializer(serializers.ModelSerializer):
+            color = TestField(queryset=DisplayValueTargetModel.objects.all())
+
+            class Meta:
+                model = DisplayValueModel
+
+        serializer = TestSerializer()
+        expected = OrderedDict([('1', 'My Red Color'), ('2', 'My Yellow Color'), ('3', 'My Green Color')])
+        self.assertEqual(serializer.fields['color'].choices, expected)
 
 
 class TestIntegration(TestCase):
@@ -768,3 +861,41 @@ class Issue2704TestCase(TestCase):
         }]
 
         assert serializer.data == expected
+
+
+class DecimalFieldModel(models.Model):
+    decimal_field = models.DecimalField(
+        max_digits=3,
+        decimal_places=1,
+        validators=[MinValueValidator(1), MaxValueValidator(3)]
+    )
+
+
+class TestDecimalFieldMappings(TestCase):
+    @pytest.mark.skipif(DecimalValidator is not None,
+                        reason='DecimalValidator is available in Django 1.9+')
+    def test_decimal_field_has_no_decimal_validator(self):
+        """
+        Test that a DecimalField has no validators before Django 1.9.
+        """
+        class TestSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = DecimalFieldModel
+
+        serializer = TestSerializer()
+
+        assert len(serializer.fields['decimal_field'].validators) == 0
+
+    @pytest.mark.skipif(DecimalValidator is None,
+                        reason='DecimalValidator is available in Django 1.9+')
+    def test_decimal_field_has_decimal_validator(self):
+        """
+        Test that a DecimalField has DecimalValidator in Django 1.9+.
+        """
+        class TestSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = DecimalFieldModel
+
+        serializer = TestSerializer()
+
+        assert len(serializer.fields['decimal_field'].validators) == 2

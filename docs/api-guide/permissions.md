@@ -74,8 +74,8 @@ You can also set the authentication policy on a per-view, or per-viewset basis,
 using the `APIView` class based views.
 
     from rest_framework.permissions import IsAuthenticated
-	from rest_framework.response import Response
-	from rest_framework.views import APIView
+    from rest_framework.response import Response
+    from rest_framework.views import APIView
 
     class ExampleView(APIView):
         permission_classes = (IsAuthenticated,)
@@ -87,6 +87,10 @@ using the `APIView` class based views.
             return Response(content)
 
 Or, if you're using the `@api_view` decorator with function based views.
+
+    from rest_framework.decorators import api_view, permission_classes
+    from rest_framework.permissions import IsAuthenticated
+    from rest_framework.response import Response
 
     @api_view('GET')
     @permission_classes((IsAuthenticated, ))
@@ -251,6 +255,10 @@ The [Composed Permissions][composed-permissions] package provides a simple way t
 
 The [REST Condition][rest-condition] package is another extension for building complex permissions in a simple and convenient way.  The extension allows you to combine permissions with logical operators.
 
+## DRY Rest Permissions
+
+The [DRY Rest Permissions][dry-rest-permissions] package provides the ability to define different permissions for individual default and custom actions. This package is made for apps with permissions that are derived from relationships defined in the app's data model. It also supports permission checks being returned to a client app through the API's serializer. Additionally it supports adding permissions to the default and custom list actions to restrict the data they retrive per user.
+
 [cite]: https://developer.apple.com/library/mac/#documentation/security/Conceptual/AuthenticationAndAuthorizationGuide/Authorization/Authorization.html
 [authentication]: authentication.md
 [throttling]: throttling.md
@@ -264,3 +272,4 @@ The [REST Condition][rest-condition] package is another extension for building c
 [drf-any-permissions]: https://github.com/kevin-brown/drf-any-permissions
 [composed-permissions]: https://github.com/niwibe/djangorestframework-composed-permissions
 [rest-condition]: https://github.com/caxap/rest_condition
+[dry-rest-permissions]: https://github.com/Helioscene/dry-rest-permissions

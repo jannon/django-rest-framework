@@ -3,18 +3,18 @@ Provides an APIView class that is the base of all views in REST framework.
 """
 from __future__ import unicode_literals
 
-import inspect
-import warnings
-
 from django.core.exceptions import PermissionDenied
+from django.db import models
 from django.http import Http404
+from django.http.response import HttpResponseBase
 from django.utils import six
 from django.utils.encoding import smart_text
 from django.utils.translation import ugettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
+from django.views.generic import View
 
 from rest_framework import exceptions, status
-from rest_framework.compat import HttpResponseBase, View, set_rollback
+from rest_framework.compat import set_rollback
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -118,8 +118,19 @@ class APIView(View):
         This allows us to discover information about the view when we do URL
         reverse lookups.  Used for breadcrumb generation.
         """
+        if isinstance(getattr(cls, 'queryset', None), models.query.QuerySet):
+            def force_evaluation():
+                raise RuntimeError(
+                    'Do not evaluate the `.queryset` attribute directly, '
+                    'as the result will be cached and reused between requests. '
+                    'Use `.all()` or call `.get_queryset()` instead.'
+                )
+            cls.queryset._fetch_all = force_evaluation
+            cls.queryset._result_iter = force_evaluation  # Django <= 1.5
+
         view = super(APIView, cls).as_view(**initkwargs)
         view.cls = cls
+
         # Note: session based authentication is explicitly CSRF validated,
         # all other authentication is CSRF exempt.
         return csrf_exempt(view)
@@ -416,16 +427,8 @@ class APIView(View):
 
         exception_handler = self.settings.EXCEPTION_HANDLER
 
-        if len(inspect.getargspec(exception_handler).args) == 1:
-            warnings.warn(
-                'The `exception_handler(exc)` call signature is deprecated. '
-                'Use `exception_handler(exc, context) instead.',
-                DeprecationWarning
-            )
-            response = exception_handler(exc)
-        else:
-            context = self.get_exception_handler_context()
-            response = exception_handler(exc, context)
+        context = self.get_exception_handler_context()
+        response = exception_handler(exc, context)
 
         if response is None:
             raise
