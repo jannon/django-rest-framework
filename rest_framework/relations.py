@@ -1,6 +1,8 @@
 # coding: utf-8
 from __future__ import unicode_literals
 
+from collections import OrderedDict
+
 from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
 from django.core.urlresolvers import (
     NoReverseMatch, Resolver404, get_script_prefix, resolve
@@ -12,10 +14,25 @@ from django.utils.encoding import smart_text
 from django.utils.six.moves.urllib import parse as urlparse
 from django.utils.translation import ugettext_lazy as _
 
-from rest_framework.compat import OrderedDict
-from rest_framework.fields import Field, empty, get_attribute
+from rest_framework.fields import (
+    Field, empty, get_attribute, is_simple_callable, iter_options
+)
 from rest_framework.reverse import reverse
 from rest_framework.utils import html
+
+
+class Hyperlink(six.text_type):
+    """
+    A string like object that additionally has an associated name.
+    We use this for hyperlinked URLs that may render as a named link
+    in some contexts, or render as a plain URL in others.
+    """
+    def __new__(self, url, name):
+        ret = six.text_type.__new__(self, url)
+        ret.name = name
+        return ret
+
+    is_hyperlink = True
 
 
 class PKOnlyObject(object):
@@ -32,13 +49,19 @@ class PKOnlyObject(object):
 # rather than the parent serializer.
 MANY_RELATION_KWARGS = (
     'read_only', 'write_only', 'required', 'default', 'initial', 'source',
-    'label', 'help_text', 'style', 'error_messages'
+    'label', 'help_text', 'style', 'error_messages', 'allow_empty'
 )
 
 
 class RelatedField(Field):
+    queryset = None
+    html_cutoff = 1000
+    html_cutoff_text = _('More than {count} items...')
+
     def __init__(self, **kwargs):
-        self.queryset = kwargs.pop('queryset', None)
+        self.queryset = kwargs.pop('queryset', self.queryset)
+        self.html_cutoff = kwargs.pop('html_cutoff', self.html_cutoff)
+        self.html_cutoff_text = kwargs.pop('html_cutoff_text', self.html_cutoff_text)
         assert self.queryset is not None or kwargs.get('read_only', None), (
             'Relational field must provide a `queryset` argument, '
             'or set read_only=`True`.'
@@ -48,6 +71,7 @@ class RelatedField(Field):
             'when setting read_only=`True`.'
         )
         kwargs.pop('many', None)
+        kwargs.pop('allow_empty', None)
         super(RelatedField, self).__init__(**kwargs)
 
     def __new__(cls, *args, **kwargs):
@@ -106,7 +130,12 @@ class RelatedField(Field):
             # Optimized case, return a mock object only containing the pk attribute.
             try:
                 instance = get_attribute(instance, self.source_attrs[:-1])
-                return PKOnlyObject(pk=instance.serializable_value(self.source_attrs[-1]))
+                value = instance.serializable_value(self.source_attrs[-1])
+                if is_simple_callable(value):
+                    # Handle edge case where the relationship `source` argument
+                    # points to a `get_relationship()` method on the model
+                    value = value().pk
+                return PKOnlyObject(pk=value)
             except AttributeError:
                 pass
 
@@ -124,10 +153,24 @@ class RelatedField(Field):
         return OrderedDict([
             (
                 six.text_type(self.to_representation(item)),
-                six.text_type(item)
+                self.display_value(item)
             )
             for item in queryset
         ])
+
+    @property
+    def grouped_choices(self):
+        return self.choices
+
+    def iter_options(self):
+        return iter_options(
+            self.grouped_choices,
+            cutoff=self.html_cutoff,
+            cutoff_text=self.html_cutoff_text
+        )
+
+    def display_value(self, instance):
+        return six.text_type(instance)
 
 
 class StringRelatedField(RelatedField):
@@ -176,6 +219,7 @@ class PrimaryKeyRelatedField(RelatedField):
 
 class HyperlinkedRelatedField(RelatedField):
     lookup_field = 'pk'
+    view_name = None
 
     default_error_messages = {
         'required': _('This field is required.'),
@@ -186,8 +230,9 @@ class HyperlinkedRelatedField(RelatedField):
     }
 
     def __init__(self, view_name=None, **kwargs):
-        assert view_name is not None, 'The `view_name` argument is required.'
-        self.view_name = view_name
+        if view_name is not None:
+            self.view_name = view_name
+        assert self.view_name is not None, 'The `view_name` argument is required.'
         self.lookup_field = kwargs.pop('lookup_field', self.lookup_field)
         self.lookup_url_kwarg = kwargs.pop('lookup_url_kwarg', self.lookup_field)
         self.format = kwargs.pop('format', None)
@@ -227,6 +272,9 @@ class HyperlinkedRelatedField(RelatedField):
         lookup_value = getattr(obj, self.lookup_field)
         kwargs = {self.lookup_url_kwarg: lookup_value}
         return self.reverse(view_name, kwargs=kwargs, request=request, format=format)
+
+    def get_name(self, obj):
+        return six.text_type(obj)
 
     def to_internal_value(self, data):
         request = self.context.get('request', None)
@@ -286,7 +334,7 @@ class HyperlinkedRelatedField(RelatedField):
 
         # Return the hyperlink, or error if incorrectly configured.
         try:
-            return self.get_url(value, self.view_name, request, format)
+            url = self.get_url(value, self.view_name, request, format)
         except NoReverseMatch:
             msg = (
                 'Could not resolve URL for hyperlinked relationship using '
@@ -302,6 +350,12 @@ class HyperlinkedRelatedField(RelatedField):
                     "entries in your URL conf." % value_string
                 )
             raise ImproperlyConfigured(msg % self.view_name)
+
+        if url is None:
+            return None
+
+        name = self.get_name(value)
+        return Hyperlink(url, name)
 
 
 class HyperlinkedIdentityField(HyperlinkedRelatedField):
@@ -326,7 +380,7 @@ class HyperlinkedIdentityField(HyperlinkedRelatedField):
 
 class SlugRelatedField(RelatedField):
     """
-    A read-write field the represents the target of the relationship
+    A read-write field that represents the target of the relationship
     by a unique 'slug' attribute.
     """
 
@@ -366,9 +420,19 @@ class ManyRelatedField(Field):
     """
     initial = []
     default_empty_html = []
+    default_error_messages = {
+        'not_a_list': _('Expected a list of items but got type "{input_type}".'),
+        'empty': _('This list may not be empty.')
+    }
+    html_cutoff = 1000
+    html_cutoff_text = _('More than {count} items...')
 
     def __init__(self, child_relation=None, *args, **kwargs):
         self.child_relation = child_relation
+        self.allow_empty = kwargs.pop('allow_empty', True)
+        self.html_cutoff = kwargs.pop('html_cutoff', self.html_cutoff)
+        self.html_cutoff_text = kwargs.pop('html_cutoff_text', self.html_cutoff_text)
+
         assert child_relation is not None, '`child_relation` is a required argument.'
         super(ManyRelatedField, self).__init__(*args, **kwargs)
         self.child_relation.bind(field_name='', parent=self)
@@ -386,6 +450,11 @@ class ManyRelatedField(Field):
         return dictionary.get(self.field_name, empty)
 
     def to_internal_value(self, data):
+        if isinstance(data, type('')) or not hasattr(data, '__iter__'):
+            self.fail('not_a_list', input_type=type(data).__name__)
+        if not self.allow_empty and len(data) == 0:
+            self.fail('empty')
+
         return [
             self.child_relation.to_internal_value(item)
             for item in data
@@ -408,3 +477,14 @@ class ManyRelatedField(Field):
     @property
     def choices(self):
         return self.child_relation.choices
+
+    @property
+    def grouped_choices(self):
+        return self.choices
+
+    def iter_options(self):
+        return iter_options(
+            self.grouped_choices,
+            cutoff=self.html_cutoff,
+            cutoff_text=self.html_cutoff_text
+        )

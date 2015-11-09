@@ -8,7 +8,7 @@ from django.core import validators
 from django.db import models
 from django.utils.text import capfirst
 
-from rest_framework.compat import clean_manytomany_helptext
+from rest_framework.compat import DecimalValidator
 from rest_framework.validators import UniqueValidator
 
 NUMERIC_FIELD_TYPES = (
@@ -107,16 +107,40 @@ def get_field_kwargs(field_name, model_field):
                               isinstance(model_field, models.TextField)):
         kwargs['allow_blank'] = True
 
-    if model_field.flatchoices:
+    if isinstance(model_field, models.FilePathField):
+        kwargs['path'] = model_field.path
+
+        if model_field.match is not None:
+            kwargs['match'] = model_field.match
+
+        if model_field.recursive is not False:
+            kwargs['recursive'] = model_field.recursive
+
+        if model_field.allow_files is not True:
+            kwargs['allow_files'] = model_field.allow_files
+
+        if model_field.allow_folders is not False:
+            kwargs['allow_folders'] = model_field.allow_folders
+
+    if model_field.choices:
         # If this model field contains choices, then return early.
         # Further keyword arguments are not valid.
-        kwargs['choices'] = model_field.flatchoices
+        kwargs['choices'] = model_field.choices
         return kwargs
+
+    # Our decimal validation is handled in the field code, not validator code.
+    # (In Django 1.9+ this differs from previous style)
+    if isinstance(model_field, models.DecimalField):
+        validator_kwarg = [
+            validator for validator in validator_kwarg
+            if DecimalValidator and not isinstance(validator, DecimalValidator)
+        ]
 
     # Ensure that max_length is passed explicitly as a keyword arg,
     # rather than as a validator.
     max_length = getattr(model_field, 'max_length', None)
-    if max_length is not None and isinstance(model_field, models.CharField):
+    if max_length is not None and (isinstance(model_field, models.CharField) or
+                                   isinstance(model_field, models.TextField)):
         kwargs['max_length'] = max_length
         validator_kwarg = [
             validator for validator in validator_kwarg
@@ -185,8 +209,23 @@ def get_field_kwargs(field_name, model_field):
             if validator is not validators.validate_slug
         ]
 
+    # IPAddressField do not need to include the 'validate_ipv46_address' argument,
+    if isinstance(model_field, models.GenericIPAddressField):
+        validator_kwarg = [
+            validator for validator in validator_kwarg
+            if validator is not validators.validate_ipv46_address
+        ]
+
     if getattr(model_field, 'unique', False):
-        validator = UniqueValidator(queryset=model_field.model._default_manager)
+        unique_error_message = model_field.error_messages.get('unique', None)
+        if unique_error_message:
+            unique_error_message = unique_error_message % {
+                'model_name': model_field.model._meta.object_name,
+                'field_label': model_field.verbose_name
+            }
+        validator = UniqueValidator(
+            queryset=model_field.model._default_manager,
+            message=unique_error_message)
         validator_kwarg.append(validator)
 
     if validator_kwarg:
@@ -199,7 +238,7 @@ def get_relation_kwargs(field_name, relation_info):
     """
     Creates a default instance of a flat relational field.
     """
-    model_field, related_model, to_many, has_through_model = relation_info
+    model_field, related_model, to_many, to_field, has_through_model = relation_info
     kwargs = {
         'queryset': related_model._default_manager,
         'view_name': get_detail_view_name(related_model)
@@ -208,6 +247,9 @@ def get_relation_kwargs(field_name, relation_info):
     if to_many:
         kwargs['many'] = True
 
+    if to_field:
+        kwargs['to_field'] = to_field
+
     if has_through_model:
         kwargs['read_only'] = True
         kwargs.pop('queryset', None)
@@ -215,7 +257,7 @@ def get_relation_kwargs(field_name, relation_info):
     if model_field:
         if model_field.verbose_name and needs_label(model_field, field_name):
             kwargs['label'] = capfirst(model_field.verbose_name)
-        help_text = clean_manytomany_helptext(model_field.help_text)
+        help_text = model_field.help_text
         if help_text:
             kwargs['help_text'] = help_text
         if not model_field.editable:
@@ -225,7 +267,8 @@ def get_relation_kwargs(field_name, relation_info):
             # If this field is read-only, then return early.
             # No further keyword arguments are valid.
             return kwargs
-        if model_field.has_default() or model_field.null:
+
+        if model_field.has_default() or model_field.blank or model_field.null:
             kwargs['required'] = False
         if model_field.null:
             kwargs['allow_null'] = True
@@ -234,6 +277,8 @@ def get_relation_kwargs(field_name, relation_info):
         if getattr(model_field, 'unique', False):
             validator = UniqueValidator(queryset=model_field.model._default_manager)
             kwargs['validators'] = kwargs.get('validators', []) + [validator]
+        if to_many and not model_field.blank:
+            kwargs['allow_empty'] = False
 
     return kwargs
 

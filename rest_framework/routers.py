@@ -16,14 +16,13 @@ For example, you might have a `urls.py` that looks something like this:
 from __future__ import unicode_literals
 
 import itertools
-from collections import namedtuple
+from collections import OrderedDict, namedtuple
 
 from django.conf.urls import url
 from django.core.exceptions import ImproperlyConfigured
 from django.core.urlresolvers import NoReverseMatch
 
 from rest_framework import views
-from rest_framework.compat import OrderedDict, get_resolver_match
 from rest_framework.response import Response
 from rest_framework.reverse import reverse
 from rest_framework.urlpatterns import format_suffix_patterns
@@ -175,7 +174,7 @@ class SimpleRouter(BaseRouter):
                 url_path = initkwargs.pop("url_path", None) or methodname
                 ret.append(Route(
                     url=replace_methodname(route.url, url_path),
-                    mapping=dict((httpmethod, methodname) for httpmethod in httpmethods),
+                    mapping={httpmethod: methodname for httpmethod in httpmethods},
                     name=replace_methodname(route.name, url_path),
                     initkwargs=initkwargs,
                 ))
@@ -284,13 +283,15 @@ class DefaultRouter(SimpleRouter):
 
             def get(self, request, *args, **kwargs):
                 ret = OrderedDict()
-                namespace = get_resolver_match(request).namespace
+                namespace = request.resolver_match.namespace
                 for key, url_name in api_root_dict.items():
                     if namespace:
                         url_name = namespace + ':' + url_name
                     try:
                         ret[key] = reverse(
                             url_name,
+                            args=args,
+                            kwargs=kwargs,
                             request=request,
                             format=kwargs.get('format', None)
                         )

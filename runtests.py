@@ -8,8 +8,8 @@ import sys
 import pytest
 
 PYTEST_ARGS = {
-    'default': ['tests', '--tb=short'],
-    'fast': ['tests', '--tb=short', '-q'],
+    'default': ['tests', '--tb=short', '-s'],
+    'fast': ['tests', '--tb=short', '-q', '-s'],
 }
 
 FLAKE8_ARGS = ['rest_framework', 'tests', '--ignore=E501']
@@ -87,6 +87,18 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         pytest_args = sys.argv[1:]
         first_arg = pytest_args[0]
+
+        try:
+            pytest_args.remove('--coverage')
+        except ValueError:
+            pass
+        else:
+            pytest_args = [
+                '--cov-report',
+                'xml',
+                '--cov',
+                'rest_framework'] + pytest_args
+
         if first_arg.startswith('-'):
             # `runtests.py [flags]`
             pytest_args = ['tests'] + pytest_args

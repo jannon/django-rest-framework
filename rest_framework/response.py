@@ -10,6 +10,8 @@ from django.template.response import SimpleTemplateResponse
 from django.utils import six
 from django.utils.six.moves.http_client import responses
 
+from rest_framework.serializers import Serializer
+
 
 class Response(SimpleTemplateResponse):
     """
@@ -28,6 +30,15 @@ class Response(SimpleTemplateResponse):
         For example being set automatically by the `APIView`.
         """
         super(Response, self).__init__(None, status=status)
+
+        if isinstance(data, Serializer):
+            msg = (
+                'You passed a Serializer instance as data, but '
+                'probably meant to pass serialized `.data` or '
+                '`.error`. representation.'
+            )
+            raise AssertionError(msg)
+
         self.data = data
         self.template_name = template_name
         self.exception = exception
@@ -87,7 +98,7 @@ class Response(SimpleTemplateResponse):
         state = super(Response, self).__getstate__()
         for key in (
             'accepted_renderer', 'renderer_context', 'resolver_match',
-            'client', 'request', 'wsgi_request'
+            'client', 'request', 'json', 'wsgi_request'
         ):
             if key in state:
                 del state[key]

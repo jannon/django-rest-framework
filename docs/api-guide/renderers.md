@@ -153,23 +153,13 @@ You can use `StaticHTMLRenderer` either to return regular HTML pages using REST 
 
 See also: `TemplateHTMLRenderer`
 
-## HTMLFormRenderer
-
-Renders data returned by a serializer into an HTML form.  The output of this renderer does not include the enclosing `<form>` tags or an submit actions, as you'll probably need those to include the desired method and URL.  Also note that the `HTMLFormRenderer` does not yet support including field error messages.
-
-Note that the template used by the `HTMLFormRenderer` class, and the context submitted to it **may be subject to change**.  If you need to use this renderer class it is advised that you either make a local copy of the class and templates, or follow the release note on REST framework upgrades closely.
-
-**.media_type**: `text/html`
-
-**.format**: `'.form'`
-
-**.charset**: `utf-8`
-
-**.template**: `'rest_framework/form.html'`
-
 ## BrowsableAPIRenderer
 
-Renders data into HTML for the Browsable API.  This renderer will determine which other renderer would have been given highest priority, and use that to display an API style response within the HTML page.
+Renders data into HTML for the Browsable API:
+
+![The BrowsableAPIRenderer](../img/quickstart.png)
+
+This renderer will determine which other renderer would have been given highest priority, and use that to display an API style response within the HTML page.
 
 **.media_type**: `text/html`
 
@@ -186,6 +176,48 @@ By default the response content will be rendered with the highest priority rende
     class CustomBrowsableAPIRenderer(BrowsableAPIRenderer):
         def get_default_renderer(self, view):
             return JSONRenderer()
+
+##  AdminRenderer
+
+Renders data into HTML for an admin-like display:
+
+![The AdminRender view](../img/admin.png)
+
+This renderer is suitable for CRUD-style web APIs that should also present a user-friendly interface for managing the data.
+
+Note that views that have nested or list serializers for their input won't work well with the `AdminRenderer`, as the HTML forms are unable to properly support them.
+
+**.media_type**: `text/html`
+
+**.format**: `'.admin'`
+
+**.charset**: `utf-8`
+
+**.template**: `'rest_framework/admin.html'`
+
+## HTMLFormRenderer
+
+Renders data returned by a serializer into an HTML form. The output of this renderer does not include the enclosing `<form>` tags, a hidden CSRF input or any submit buttons.
+
+This renderer is not intended to be used directly, but can instead be used in templates by passing a serializer instance to the `render_form` template tag.
+
+    {% load rest_framework %}
+
+    <form action="/submit-report/" method="post">
+        {% csrf_token %}
+        {% render_form serializer %}
+        <input type="submit" value="Save" />
+    </form>
+
+For more information see the [HTML & Forms][html-and-forms] documentation.
+
+**.media_type**: `text/html`
+
+**.format**: `'.form'`
+
+**.charset**: `utf-8`
+
+**.template**: `'rest_framework/horizontal/form.html'`
 
 ## MultiPartRenderer
 
@@ -433,6 +465,7 @@ Comma-separated values are a plain-text tabular data format, that can be easily 
 
 [cite]: https://docs.djangoproject.com/en/dev/ref/template-response/#the-rendering-process
 [conneg]: content-negotiation.md
+[html-and-forms]: ../topics/html-and-forms.md
 [browser-accept-headers]: http://www.gethifi.com/blog/browser-rest-http-accept-headers
 [testing]: testing.md
 [HATEOAS]: http://timelessrepo.com/haters-gonna-hateoas

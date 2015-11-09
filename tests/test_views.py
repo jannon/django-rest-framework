@@ -25,7 +25,7 @@ class BasicView(APIView):
         return Response({'method': 'GET'})
 
     def post(self, request, *args, **kwargs):
-        return Response({'method': 'POST', 'data': request.DATA})
+        return Response({'method': 'POST', 'data': request.data})
 
 
 @api_view(['GET', 'POST', 'PUT', 'PATCH'])
@@ -33,11 +33,11 @@ def basic_view(request):
     if request.method == 'GET':
         return {'method': 'GET'}
     elif request.method == 'POST':
-        return {'method': 'POST', 'data': request.DATA}
+        return {'method': 'POST', 'data': request.data}
     elif request.method == 'PUT':
-        return {'method': 'PUT', 'data': request.DATA}
+        return {'method': 'PUT', 'data': request.data}
     elif request.method == 'PATCH':
-        return {'method': 'PATCH', 'data': request.DATA}
+        return {'method': 'PATCH', 'data': request.data}
 
 
 class ErrorView(APIView):
@@ -74,21 +74,6 @@ class ClassBasedViewIntegrationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(sanitise_json_error(response.data), expected)
 
-    def test_400_parse_error_tunneled_content(self):
-        content = 'f00bar'
-        content_type = 'application/json'
-        form_data = {
-            api_settings.FORM_CONTENT_OVERRIDE: content,
-            api_settings.FORM_CONTENTTYPE_OVERRIDE: content_type
-        }
-        request = factory.post('/', form_data)
-        response = self.view(request)
-        expected = {
-            'detail': JSON_ERROR
-        }
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(sanitise_json_error(response.data), expected)
-
 
 class FunctionBasedViewIntegrationTests(TestCase):
     def setUp(self):
@@ -103,27 +88,12 @@ class FunctionBasedViewIntegrationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(sanitise_json_error(response.data), expected)
 
-    def test_400_parse_error_tunneled_content(self):
-        content = 'f00bar'
-        content_type = 'application/json'
-        form_data = {
-            api_settings.FORM_CONTENT_OVERRIDE: content,
-            api_settings.FORM_CONTENTTYPE_OVERRIDE: content_type
-        }
-        request = factory.post('/', form_data)
-        response = self.view(request)
-        expected = {
-            'detail': JSON_ERROR
-        }
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(sanitise_json_error(response.data), expected)
-
 
 class TestCustomExceptionHandler(TestCase):
     def setUp(self):
         self.DEFAULT_HANDLER = api_settings.EXCEPTION_HANDLER
 
-        def exception_handler(exc):
+        def exception_handler(exc, request):
             return Response('Error!', status=status.HTTP_400_BAD_REQUEST)
 
         api_settings.EXCEPTION_HANDLER = exception_handler

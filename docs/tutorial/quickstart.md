@@ -68,7 +68,7 @@ Right, we'd better write some views then.  Open `tutorial/quickstart/views.py` a
         """
         API endpoint that allows users to be viewed or edited.
         """
-        queryset = User.objects.all()
+        queryset = User.objects.all().order_by('-date_joined')
         serializer_class = UserSerializer
 
 
@@ -82,8 +82,6 @@ Right, we'd better write some views then.  Open `tutorial/quickstart/views.py` a
 Rather than write multiple views we're grouping together all the common behavior into classes called `ViewSets`.
 
 We can easily break these down into individual views if we need to, but using viewsets keeps the view logic nicely organized as well as being very concise.
-
-For trivial cases you can simply set a `model` attribute on the `ViewSet` class and the serializer and queryset will be automatically generated for you.  Setting the `queryset` and/or `serializer_class` attributes gives you more explicit control of the API behaviour, and is the recommended style for most applications.
 
 ## URLs
 
